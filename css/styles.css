@@ -1,0 +1,46 @@
+/* Custom styles */
+.notification {
+    z-index: 1000;
+}
+
+/* Form styles */
+.form-input {
+    transition: border-color 0.2s ease-in-out;
+}
+
+.form-input:focus {
+    border-color: #3b82f6;
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+/* Button styles */
+.btn {
+    transition: all 0.2s ease-in-out;
+}
+
+.btn:hover {
+    transform: translateY(-1px);
+}
+
+.btn:active {
+    transform: translateY(0);
+}
+
+/* Table styles */
+.table-container {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Mobile optimizations */
+@media (max-width: 768px) {
+    .table-container {
+        margin: 0 -1rem;
+        padding: 0 1rem;
+    }
+    
+    .form-container {
+        padding: 1rem;
+    }
+} 
