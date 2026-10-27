@@ -1,4 +1,4 @@
-import React, { useState, FormEvent, ChangeEvent } from 'react';
+import React, { FormEvent } from 'react';
 
 interface LoginFormProps {
   onToggleForm: () => void;
@@ -11,22 +11,13 @@ interface LoginFormData {
 }
 
 const LoginForm: React.FC<LoginFormProps> = ({ onToggleForm, onSubmit }) => {
-  const [formData, setFormData] = useState<LoginFormData>({
-    username: '',
-    password: ''
-  });
-
-  const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
-    const { id, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [id]: value
-    }));
-  };
-
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    onSubmit(formData);
+    const data = new FormData(e.currentTarget);
+    onSubmit({
+      username: String(data.get('username') || ''),
+      password: String(data.get('password') || ''),
+    });
   };
 
   return (
@@ -40,8 +31,8 @@ const LoginForm: React.FC<LoginFormProps> = ({ onToggleForm, onSubmit }) => {
           <input
             type="text"
             id="username"
-            value={formData.username}
-            onChange={handleChange}
+            name="username"
+            autoComplete="username"
             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm form-input"
             required
           />
@@ -53,8 +44,8 @@ const LoginForm: React.FC<LoginFormProps> = ({ onToggleForm, onSubmit }) => {
           <input
             type="password"
             id="password"
-            value={formData.password}
-            onChange={handleChange}
+            name="password"
+            autoComplete="current-password"
             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm form-input"
             required
           />
@@ -80,4 +71,4 @@ const LoginForm: React.FC<LoginFormProps> = ({ onToggleForm, onSubmit }) => {
   );
 };
 
-export default LoginForm; 
+export default LoginForm;
