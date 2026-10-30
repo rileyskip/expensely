@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, FormEvent, ChangeEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { Pie } from 'react-chartjs-2';
 import { Chart, ArcElement, Tooltip, Legend } from 'chart.js';
@@ -382,7 +382,7 @@ function DescriptionField({
   );
 }
 
-const ExpenseTracker: React.FC<{ username: string }> = ({ username }) => {
+function ExpenseTracker({ username }: { username: string }) {
   const normalizedUsername = username.trim().toLowerCase();
   const [spendingData, setSpendingData] = useState<ExpenseItem[]>(initialData);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -570,7 +570,7 @@ const ExpenseTracker: React.FC<{ username: string }> = ({ username }) => {
     if (next) setPaycheckSettings(next);
   };
 
-  const addBalance = (event: React.FormEvent) => {
+  const addBalance = (event: FormEvent) => {
     event.preventDefault();
     const amount = Number(balanceAmount);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(balanceDate)) {
@@ -770,7 +770,7 @@ const ExpenseTracker: React.FC<{ username: string }> = ({ username }) => {
     typeof amount === 'string' ? amount : formatMoney(parseMoney(amount))
   );
 
-  const handleEditChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+  const handleEditChange = (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     if (!editExpense) return;
     const { name, value, type } = e.target;
     if (type === 'checkbox') {
@@ -1604,6 +1604,6 @@ const ExpenseTracker: React.FC<{ username: string }> = ({ username }) => {
       )}
     </div>
   );
-};
+}
 
 export default ExpenseTracker; 

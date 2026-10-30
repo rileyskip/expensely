@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import LoginForm from './components/LoginForm';
 import RegisterForm from './components/RegisterForm';
 import ExpenseTracker from './components/ExpenseTracker';
@@ -19,7 +19,7 @@ interface RegisterFormData {
   confirmPassword: string;
 }
 
-const App: React.FC = () => {
+function App() {
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
   const [showLogin, setShowLogin] = useState<boolean>(true);
   const [username, setUsername] = useState<string>('');
@@ -140,6 +140,6 @@ const App: React.FC = () => {
       </main>
     </div>
   );
-};
+}
 
 export default App;

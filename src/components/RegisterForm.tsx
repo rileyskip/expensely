@@ -1,4 +1,4 @@
-import React, { useState, FormEvent, ChangeEvent } from 'react';
+import { useState, FormEvent, ChangeEvent } from 'react';
 
 interface RegisterFormProps {
   onToggleForm: () => void;
@@ -11,7 +11,7 @@ interface RegisterFormData {
   confirmPassword: string;
 }
 
-const RegisterForm: React.FC<RegisterFormProps> = ({ onToggleForm, onSubmit }) => {
+function RegisterForm({ onToggleForm, onSubmit }: RegisterFormProps) {
   const [formData, setFormData] = useState<RegisterFormData>({
     username: '',
     password: '',
@@ -94,6 +94,6 @@ const RegisterForm: React.FC<RegisterFormProps> = ({ onToggleForm, onSubmit }) =
       </p>
     </div>
   );
-};
+}
 
 export default RegisterForm; 
