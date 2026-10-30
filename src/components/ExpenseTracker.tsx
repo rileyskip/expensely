@@ -1,9 +1,6 @@
 import { useState, useEffect, useRef, FormEvent, ChangeEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { Pie } from 'react-chartjs-2';
-import { Chart, ArcElement, Tooltip, Legend } from 'chart.js';
 import { BalanceSnapshot, DatedTransfer, ExpenseItem, PaycheckSettings, SEED_EXPENSES, addRetroactivePaycheck, buildPaychecks, clearRecurringTemplate, descriptionStyle, estimatedRemainingByKey, formatMoney, includeInSchedule, latestBalanceSnapshot, loadBalanceSnapshots, loadDatedTransfers, loadExpenses, monthRange, parseDate, parseMoney, periodThroughToday, primaryAiSuggestion, projectedRecurringRows, removeBalanceSnapshot, removeRetroactivePaycheck, removeStoredTransfer, resolvePaycheckSettings, saveBalanceSnapshot, savePaycheckSettings, savingsSuggestion, sumByCategory, upcomingSuggestions, updateRecurringTemplate } from '../expenses';
-Chart.register(ArcElement, Tooltip, Legend);
 
 const statusClasses = {
   Scheduled: 'bg-blue-500',
@@ -75,6 +72,91 @@ function DescriptionBadge({ value }: { value: string }) {
 function RemainingAmount({ value }: { value: number | undefined }) {
   if (value === undefined || !Number.isFinite(value)) return <span className="text-gray-400">—</span>;
   return <span className={`font-medium whitespace-nowrap ${value < 0 ? 'text-red-600' : 'text-gray-900'}`}>{formatMoney(value)}</span>;
+}
+
+function MenuDots() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor" aria-hidden="true">
+      <circle cx="12" cy="5" r="1.75" />
+      <circle cx="12" cy="12" r="1.75" />
+      <circle cx="12" cy="19" r="1.75" />
+    </svg>
+  );
+}
+
+function NeedMark({ need }: { need: boolean }) {
+  if (need) {
+    return (
+      <svg viewBox="0 0 20 20" className="inline h-4 w-4 text-green-500" fill="currentColor" aria-label="Yes">
+        <path fillRule="evenodd" d="M16.704 5.29a1 1 0 010 1.42l-7.25 7.25a1 1 0 01-1.42 0l-3.25-3.25a1 1 0 111.42-1.42l2.54 2.54 6.54-6.54a1 1 0 011.42 0z" clipRule="evenodd" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 20 20" className="inline h-4 w-4 text-red-500" fill="currentColor" aria-label="No">
+      <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+    </svg>
+  );
+}
+
+function CategoryPie({ slices }: { slices: { label: string; value: number; color: string }[] }) {
+  const visible = slices.filter(slice => slice.value > 0);
+  const total = visible.reduce((sum, slice) => sum + slice.value, 0);
+  if (total <= 0) {
+    return <p className="text-center text-gray-500 py-8">No spending in this view.</p>;
+  }
+
+  const size = 220;
+  const center = size / 2;
+  const radius = 96;
+  let cursor = -Math.PI / 2;
+  const wedges = visible.map((slice, index) => {
+    const sweep = (slice.value / total) * Math.PI * 2;
+    const title = `${slice.label}: ${formatMoney(slice.value)}`;
+    if (visible.length === 1) {
+      return { index, title, color: slice.color, full: true, d: '' };
+    }
+    const start = cursor;
+    cursor += sweep;
+    const x1 = center + radius * Math.cos(start);
+    const y1 = center + radius * Math.sin(start);
+    const x2 = center + radius * Math.cos(cursor);
+    const y2 = center + radius * Math.sin(cursor);
+    const large = sweep > Math.PI ? 1 : 0;
+    const d = `M ${center} ${center} L ${x1} ${y1} A ${radius} ${radius} 0 ${large} 1 ${x2} ${y2} Z`;
+    return { index, title, color: slice.color, full: false, d };
+  });
+
+  return (
+    <figure>
+      <svg viewBox={`0 0 ${size} ${size}`} role="img" aria-label="Spending by category" className="w-full h-auto">
+        {wedges.map(wedge => (
+          wedge.full ? (
+            <circle key={wedge.index} cx={center} cy={center} r={radius} fill={wedge.color}>
+              <title>{wedge.title}</title>
+            </circle>
+          ) : (
+            <path key={wedge.index} d={wedge.d} fill={wedge.color}>
+              <title>{wedge.title}</title>
+            </path>
+          )
+        ))}
+      </svg>
+      <figcaption className="mt-4">
+        <ul className="space-y-1 text-sm">
+          {visible.map((slice, index) => (
+            <li key={index} className="flex items-center justify-between gap-3">
+              <span className="flex items-center gap-2 min-w-0">
+                <span className="inline-block h-3 w-3 shrink-0 rounded-sm" style={{ backgroundColor: slice.color }} />
+                <span className="truncate">{slice.label}</span>
+              </span>
+              <span className="text-gray-700">{formatMoney(slice.value)}</span>
+            </li>
+          ))}
+        </ul>
+      </figcaption>
+    </figure>
+  );
 }
 
 type RowEdit =
@@ -214,7 +296,7 @@ function RowActions({
         onClick={toggle}
         className="p-2 rounded-md text-gray-500 hover:bg-gray-100"
       >
-        <i className="fas fa-ellipsis-v" aria-hidden="true"></i>
+        <MenuDots />
       </button>
       {open && menuStyle && createPortal(
         <div
@@ -697,17 +779,11 @@ function ExpenseTracker({ username }: { username: string }) {
     categoryTotals[cat] = (categoryTotals[cat] || 0) + amt;
   });
 
-  const pieData = {
-    labels: Object.keys(categoryTotals).map(
-      cat => cat.charAt(0).toUpperCase() + cat.slice(1)
-    ),
-    datasets: [
-      {
-        data: Object.values(categoryTotals),
-        backgroundColor: Object.keys(categoryTotals).map(cat => descriptionStyle(cat).hex),
-      },
-    ],
-  };
+  const categorySlices = Object.entries(categoryTotals).map(([category, value]) => ({
+    label: descriptionLabel(category),
+    value,
+    color: descriptionStyle(category).hex,
+  }));
 
   const handleAddExpense = () => {
     const description = resolvedDescription(newExpense.description, newExpense.descriptionText || '');
@@ -1360,7 +1436,7 @@ function ExpenseTracker({ username }: { username: string }) {
                         <td className="py-3 px-4 align-top">
                           <span className="block md:hidden text-xs text-gray-500 font-semibold mb-1">Need</span>
                           <span className="block md:inline mt-1 md:mt-0">
-                            <i className={`fas ${item.need ? 'fa-check text-green-500' : 'fa-times text-red-500'}`}></i>
+                            <NeedMark need={item.need} />
                           </span>
                         </td>
                         <td className="py-3 px-4 align-top">
@@ -1546,7 +1622,7 @@ function ExpenseTracker({ username }: { username: string }) {
                     <div className="mb-2">
                       <span className="text-xs text-gray-500 font-semibold">Need</span>
                       <div>
-                        <i className={`fas ${item.need ? 'fa-check text-green-500' : 'fa-times text-red-500'}`}></i>
+                        <NeedMark need={item.need} />
                       </div>
                     </div>
                     <div className="mb-2">
@@ -1591,7 +1667,7 @@ function ExpenseTracker({ username }: { username: string }) {
             <h2 className="text-xl font-bold mb-4 text-center">Spending by Category</h2>
             <div className="flex justify-center">{monthTabs}</div>
             <div className="max-w-md mx-auto">
-              <Pie data={pieData} />
+              <CategoryPie slices={categorySlices} />
             </div>
           </div>
           {suggestion && (

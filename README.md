@@ -15,6 +15,8 @@ The dev server uses port 3000 unless that port is taken. To use another port:
 PORT=3010 npm start
 ```
 
+`npm run build` writes a static site to `dist`.
+
 Open the address the server prints and register a username.
 
 ## Where data lives
