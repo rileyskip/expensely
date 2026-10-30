@@ -1,4 +1,4 @@
-import React, { FormEvent } from 'react';
+import { FormEvent } from 'react';
 
 interface LoginFormProps {
   onToggleForm: () => void;
@@ -10,7 +10,7 @@ interface LoginFormData {
   password: string;
 }
 
-const LoginForm: React.FC<LoginFormProps> = ({ onToggleForm, onSubmit }) => {
+function LoginForm({ onToggleForm, onSubmit }: LoginFormProps) {
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const data = new FormData(e.currentTarget);
@@ -69,6 +69,6 @@ const LoginForm: React.FC<LoginFormProps> = ({ onToggleForm, onSubmit }) => {
       </p>
     </div>
   );
-};
+}
 
 export default LoginForm;
