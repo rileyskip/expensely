@@ -1,6 +1,6 @@
 # Expensely
 
-Expensely is a personal expense tracker. It runs in the browser and keeps each account on that browser.
+Expensely is a personal expense tracker. Accounts and expenses are stored in Neon Postgres for the signed-in user.
 
 ## Run
 
@@ -15,15 +15,13 @@ The dev server uses port 3000 unless that port is taken. To use another port:
 PORT=3010 npm start
 ```
 
-`npm run build` writes a static site to `dist`.
+`npm run build` writes the site to `dist`. `npm run preview` serves that build with the same account API.
 
-Open the address the server prints and register a username.
+The first visit asks you to create the admin account. After that, open Access and add anyone else who should be able to sign in. A blocked or removed account cannot log in. The same accounts work from any browser that can reach this server, because they are stored in the linked Neon database (`.env.local`, from `neon deploy`).
 
 ## Where data lives
 
-Accounts, passwords, expenses, paycheck settings, description choices, and recorded balances stay in the browser for that exact address. Restarting the dev server does not remove them. The app never sends logins or expenses anywhere.
-
-A new computer, a fresh clone, another browser, or another port starts empty. Two tabs in the same browser at the same address share one set of accounts. The login form submits the username and password that are in the fields, including a login the browser has saved for that address.
+Usernames, password hashes, expenses, paycheck settings, recorded balances, transfers, and description choices live in Neon Postgres for that user. The browser keeps only an HttpOnly session cookie. A copy still sitting in local storage is uploaded once for that account, then removed. Signing in on another browser shows the same ledger.
 
 ## Expenses
 

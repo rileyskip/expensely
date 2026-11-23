@@ -1,23 +1,29 @@
-import { FormEvent } from 'react';
-
-interface LoginFormProps {
-  onToggleForm: () => void;
-  onSubmit: (data: LoginFormData) => void;
-}
+import { FormEvent, useState } from 'react';
 
 interface LoginFormData {
   username: string;
   password: string;
 }
 
-function LoginForm({ onToggleForm, onSubmit }: LoginFormProps) {
-  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const data = new FormData(e.currentTarget);
-    onSubmit({
-      username: String(data.get('username') || ''),
-      password: String(data.get('password') || ''),
-    });
+interface LoginFormProps {
+  onSubmit: (data: LoginFormData) => Promise<void>;
+}
+
+function LoginForm({ onSubmit }: LoginFormProps) {
+  const [pending, setPending] = useState(false);
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    setPending(true);
+    try {
+      await onSubmit({
+        username: String(data.get('username') || ''),
+        password: String(data.get('password') || ''),
+      });
+    } finally {
+      setPending(false);
+    }
   };
 
   return (
@@ -52,20 +58,14 @@ function LoginForm({ onToggleForm, onSubmit }: LoginFormProps) {
         </div>
         <button
           type="submit"
-          className="w-full bg-blue-500 text-white py-2 px-4 rounded-md hover:bg-blue-600 btn"
+          disabled={pending}
+          className="w-full bg-blue-500 text-white py-2 px-4 rounded-md hover:bg-blue-600 btn disabled:opacity-60"
         >
-          Login
+          {pending ? 'Signing in…' : 'Login'}
         </button>
       </form>
       <p className="mt-4 text-center text-sm text-gray-600">
-        Don't have an account?
-        <button
-          type="button"
-          onClick={onToggleForm}
-          className="text-blue-500 hover:text-blue-600 ml-1"
-        >
-          Register here
-        </button>
+        Sign-in is limited to accounts an admin has added.
       </p>
     </div>
   );

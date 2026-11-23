@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, FormEvent, ChangeEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { BalanceSnapshot, DatedTransfer, ExpenseItem, PaycheckSettings, SEED_EXPENSES, addRetroactivePaycheck, buildPaychecks, clearRecurringTemplate, descriptionStyle, estimatedRemainingByKey, formatMoney, includeInSchedule, latestBalanceSnapshot, loadBalanceSnapshots, loadDatedTransfers, loadExpenses, monthRange, parseDate, parseMoney, periodThroughToday, primaryAiSuggestion, projectedRecurringRows, removeBalanceSnapshot, removeRetroactivePaycheck, removeStoredTransfer, resolvePaycheckSettings, saveBalanceSnapshot, savePaycheckSettings, savingsSuggestion, sumByCategory, upcomingSuggestions, updateRecurringTemplate } from '../expenses';
+import { BalanceSnapshot, DatedTransfer, ExpenseItem, PaycheckSettings, SEED_EXPENSES, UserLedger, addRetroactivePaycheck, buildPaychecks, clearBrowserLedger, clearRecurringTemplate, descriptionStyle, estimatedRemainingByKey, formatMoney, includeInSchedule, installLedger, latestBalanceSnapshot, ledgerHasData, loadBalanceSnapshots, loadDatedTransfers, loadDescriptionChoices, loadExpenses, loadRemovedChoices, monthRange, parseDate, parseMoney, periodThroughToday, primaryAiSuggestion, projectedRecurringRows, readBrowserLedger, removeBalanceSnapshot, removeRetroactivePaycheck, removeStoredTransfer, resolvePaycheckSettings, saveBalanceSnapshot, saveDescriptionLists as storeDescriptionLists, savePaycheckSettings, savingsSuggestion, sumByCategory, upcomingSuggestions, updateRecurringTemplate } from '../expenses';
+import { getLedger, saveLedger } from '../ledgerApi';
 
 const statusClasses = {
   Scheduled: 'bg-blue-500',
@@ -28,32 +29,6 @@ const BASE_DESCRIPTION_OPTIONS = [
   "insurance",
   "entertainment",
 ];
-
-function descriptionChoicesKey(username: string): string {
-  return `description_choices_${username}`;
-}
-
-function removedChoicesKey(username: string): string {
-  return `description_removed_${username}`;
-}
-
-function loadStoredLabels(key: string): string[] {
-  try {
-    const raw = localStorage.getItem(key);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string' && item.trim() !== '') : [];
-  } catch {
-    return [];
-  }
-}
-
-function loadDescriptionChoices(username: string): string[] {
-  return loadStoredLabels(descriptionChoicesKey(username));
-}
-
-function loadRemovedChoices(username: string): string[] {
-  return loadStoredLabels(removedChoicesKey(username));
-}
 
 function descriptionLabel(value: string): string {
   if (value.toLowerCase() === 'ez pass') return 'EZ Pass';
@@ -497,32 +472,82 @@ function ExpenseTracker({ username }: { username: string }) {
   const [balanceAmount, setBalanceAmount] = useState('');
   const [balanceNote, setBalanceNote] = useState('');
   const [readyFor, setReadyFor] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState('');
+  const [saveError, setSaveError] = useState('');
+  const saveQueue = useRef(Promise.resolve());
+  const persistEnabled = useRef(false);
+  const rememberChange = () => {
+    persistEnabled.current = true;
+  };
   const ready = readyFor === normalizedUsername;
 
-  // Load expenses for this user on mount/username change
   useEffect(() => {
-    const saved = localStorage.getItem(`expenses_${normalizedUsername}`);
-    if (saved) {
-      setSpendingData(loadExpenses(normalizedUsername));
-    } else {
-      setSpendingData(initialData);
-    }
-    setReadyFor(normalizedUsername);
-    setPaycheckSettings(resolvePaycheckSettings(normalizedUsername));
-    setBalanceSnapshots(loadBalanceSnapshots(normalizedUsername));
-    setStatementTransfers(loadDatedTransfers(normalizedUsername));
-    setCustomChoices(loadDescriptionChoices(normalizedUsername));
-    setRemovedChoices(loadRemovedChoices(normalizedUsername));
-    setSelectedDescription('all');
+    let cancel = false;
+    setReadyFor(null);
+    setLoadError('');
+    getLedger()
+      .then(async (remote) => {
+        if (cancel) return;
+        const local = readBrowserLedger(normalizedUsername);
+        let source: UserLedger = remote;
+        let hadRecord = ledgerHasData(remote);
+        if (!hadRecord && local && ledgerHasData(local)) {
+          await saveLedger(local);
+          if (cancel) return;
+          source = local;
+          hadRecord = true;
+        }
+        clearBrowserLedger(normalizedUsername);
+        installLedger(normalizedUsername, source);
+        const expenses = hadRecord ? loadExpenses(normalizedUsername) : initialData;
+        const paychecks = resolvePaycheckSettings(normalizedUsername);
+        const balances = loadBalanceSnapshots(normalizedUsername);
+        const transfers = loadDatedTransfers(normalizedUsername);
+        const choices = loadDescriptionChoices(normalizedUsername);
+        const removed = loadRemovedChoices(normalizedUsername);
+        persistEnabled.current = false;
+        setSpendingData(expenses);
+        setPaycheckSettings(paychecks);
+        setBalanceSnapshots(balances);
+        setStatementTransfers(transfers);
+        setCustomChoices(choices);
+        setRemovedChoices(removed);
+        setSelectedDescription('all');
+        setReadyFor(normalizedUsername);
+      })
+      .catch(() => {
+        if (!cancel) setLoadError('Could not load your expenses.');
+      });
+    return () => {
+      cancel = true;
+    };
   }, [normalizedUsername]);
 
-  // Save expenses for this user whenever they change
   useEffect(() => {
-    if (!ready) return;
-    const key = `expenses_${normalizedUsername}`;
-    const updatedData = [...spendingData];
-    localStorage.setItem(key, JSON.stringify(updatedData));
-  }, [spendingData, normalizedUsername, ready]);
+    if (!ready || !persistEnabled.current) return;
+    const ledger = {
+      expenses: spendingData,
+      paycheckSettings,
+      balanceSnapshots,
+      transfers: statementTransfers.map(transfer => ({
+        key: transfer.key,
+        amount: transfer.amount,
+        direction: transfer.direction,
+      })),
+      descriptionChoices: customChoices,
+      removedChoices,
+    };
+    installLedger(normalizedUsername, ledger);
+    saveQueue.current = saveQueue.current
+      .catch(() => undefined)
+      .then(async () => {
+        await saveLedger(ledger);
+        setSaveError('');
+      })
+      .catch(() => {
+        setSaveError('Could not save your expenses.');
+      });
+  }, [ready, spendingData, paycheckSettings, balanceSnapshots, statementTransfers, customChoices, removedChoices, normalizedUsername]);
 
   useEffect(() => {
     const scoped = selectedMonth === 'all'
@@ -566,6 +591,7 @@ function ExpenseTracker({ username }: { username: string }) {
   const paychecks = buildPaychecks(new Date(), paycheckSettings).filter(item => includeInSchedule(item));
 
   const addPastPaycheck = () => {
+    rememberChange();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(newExpense.date)) {
       setPastPayNote('Choose a paycheck date.');
       return;
@@ -603,6 +629,7 @@ function ExpenseTracker({ username }: { username: string }) {
   };
 
   const addTransferIn = () => {
+    rememberChange();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(newExpense.date)) {
       setPastPayNote('Choose the date the money was transferred in.');
       return;
@@ -630,6 +657,7 @@ function ExpenseTracker({ username }: { username: string }) {
   };
 
   const markTransferredIn = (index: number, transferredIn: boolean) => {
+    rememberChange();
     setSpendingData(current => current.map((item, itemIndex) => {
       if (itemIndex !== index) return item;
       if (!transferredIn) {
@@ -648,11 +676,13 @@ function ExpenseTracker({ username }: { username: string }) {
   };
 
   const removePastPaycheck = (date: string) => {
+    rememberChange();
     const next = removeRetroactivePaycheck(normalizedUsername, date);
     if (next) setPaycheckSettings(next);
   };
 
   const addBalance = (event: FormEvent) => {
+    rememberChange();
     event.preventDefault();
     const amount = Number(balanceAmount);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(balanceDate)) {
@@ -675,6 +705,7 @@ function ExpenseTracker({ username }: { username: string }) {
   };
 
   const removeBalance = (date: string) => {
+    rememberChange();
     setBalanceSnapshots(removeBalanceSnapshot(normalizedUsername, date));
   };
 
@@ -738,8 +769,8 @@ function ExpenseTracker({ username }: { username: string }) {
   )).sort((a, b) => descriptionLabel(a).localeCompare(descriptionLabel(b)));
 
   const saveDescriptionLists = (custom: string[], removed: string[]) => {
-    localStorage.setItem(descriptionChoicesKey(normalizedUsername), JSON.stringify(custom));
-    localStorage.setItem(removedChoicesKey(normalizedUsername), JSON.stringify(removed));
+    rememberChange();
+    storeDescriptionLists(normalizedUsername, custom, removed);
     setCustomChoices(custom);
     setRemovedChoices(removed);
   };
@@ -786,6 +817,7 @@ function ExpenseTracker({ username }: { username: string }) {
   }));
 
   const handleAddExpense = () => {
+    rememberChange();
     const description = resolvedDescription(newExpense.description, newExpense.descriptionText || '');
     addDescriptionChoice(description);
     const formattedExpense: ExpenseItem = {
@@ -795,13 +827,7 @@ function ExpenseTracker({ username }: { username: string }) {
       descriptionManual: true,
       amount: `$${newExpense.amount.toFixed(2)}`,
     };
-    const updatedData = [...spendingData, formattedExpense];
-    setSpendingData(updatedData);
-    // Save updated data to localStorage immediately
-    const key = `expenses_${normalizedUsername}`;
-    console.log('Saving data with key:', key);
-    console.log('Data being saved:', updatedData);
-    localStorage.setItem(key, JSON.stringify(updatedData));
+    setSpendingData([...spendingData, formattedExpense]);
     setShowAddForm(false);
     setNewExpense({
       merchant: '',
@@ -816,13 +842,8 @@ function ExpenseTracker({ username }: { username: string }) {
   };
 
   const handleDelete = (index: number) => {
-    const updatedData = spendingData.filter((_, i) => i !== index);
-    setSpendingData(updatedData);
-    // Save updated data to localStorage immediately
-    const key = `expenses_${normalizedUsername}`;
-    console.log('Saving data with key:', key);
-    console.log('Data being saved:', updatedData);
-    localStorage.setItem(key, JSON.stringify(updatedData));
+    rememberChange();
+    setSpendingData(spendingData.filter((_, i) => i !== index));
   };
 
   const beginEdit = (item: ExpenseItem, index: number) => {
@@ -863,6 +884,7 @@ function ExpenseTracker({ username }: { username: string }) {
   };
 
   const handleSave = () => {
+    rememberChange();
     if (!editExpense || !editTarget) return;
     const description = resolvedDescription(editExpense.description, editOtherText);
     const amount = formattedEditAmount(editExpense.amount);
@@ -932,6 +954,7 @@ function ExpenseTracker({ username }: { username: string }) {
   };
 
   const deleteRow = (item: ExpenseItem, index: number) => {
+    rememberChange();
     if (index >= 0) {
       handleDelete(index);
     } else if (item.source === 'recurring') {
@@ -970,12 +993,22 @@ function ExpenseTracker({ username }: { username: string }) {
     </div>
   );
 
+  if (loadError) {
+    return <p className="text-center text-red-600">{loadError}</p>;
+  }
+  if (!ready) {
+    return <p className="text-center text-gray-600">Loading your expenses…</p>;
+  }
+
   return (
     <div>
       <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-4 md:mb-0">
-          Your Expense Manager
-        </h1>
+        <div className="mb-4 md:mb-0">
+          <h1 className="text-3xl font-bold text-gray-900">
+            Your Expense Manager
+          </h1>
+          {saveError && <p className="mt-1 text-sm text-red-600">{saveError}</p>}
+        </div>
         <button
           onClick={() => setShowAddForm(true)}
           className="bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600 btn w-full md:w-auto"

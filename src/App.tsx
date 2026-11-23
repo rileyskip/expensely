@@ -1,38 +1,28 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import LoginForm from './components/LoginForm';
-import RegisterForm from './components/RegisterForm';
+import AdminSetup from './components/AdminSetup';
+import AdminPanel from './components/AdminPanel';
 import ExpenseTracker from './components/ExpenseTracker';
+import {
+  SessionUser,
+  clearLegacyAuthStorage,
+  getSession,
+  login,
+  logout,
+  setupAdmin,
+} from './authApi';
 
 interface NotificationState {
   message: string;
   type: 'success' | 'error';
 }
 
-interface LoginFormData {
-  username: string;
-  password: string;
-}
-
-interface RegisterFormData {
-  username: string;
-  password: string;
-  confirmPassword: string;
-}
-
 function App() {
-  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
-  const [showLogin, setShowLogin] = useState<boolean>(true);
-  const [username, setUsername] = useState<string>('');
+  const [ready, setReady] = useState(false);
+  const [needsSetup, setNeedsSetup] = useState(false);
+  const [user, setUser] = useState<SessionUser | null>(null);
+  const [showAccess, setShowAccess] = useState(false);
   const [notification, setNotification] = useState<NotificationState>({ message: '', type: 'success' });
-
-  useEffect(() => {
-    const storedLoginState = localStorage.getItem('isLoggedIn') === 'true';
-    const storedUsername = localStorage.getItem('username');
-    if (storedLoginState && storedUsername) {
-      setIsLoggedIn(true);
-      setUsername(storedUsername.trim().toLowerCase());
-    }
-  }, []);
 
   const showNotification = (message: string, type: 'success' | 'error' = 'success') => {
     setNotification({ message, type });
@@ -41,50 +31,50 @@ function App() {
     }, 3000);
   };
 
-  const handleLogin = (loginData: LoginFormData) => {
-    const normalizedUsername = loginData.username.trim().toLowerCase();
-    const storedPassword = localStorage.getItem(`password_${normalizedUsername}`);
-    if (storedPassword === loginData.password) {
-      localStorage.setItem('isLoggedIn', 'true');
-      localStorage.setItem('username', normalizedUsername);
-      setIsLoggedIn(true);
-      setUsername(normalizedUsername);
+  useEffect(() => {
+    clearLegacyAuthStorage();
+    getSession()
+      .then((session) => {
+        setNeedsSetup(session.needsSetup);
+        setUser(session.user);
+      })
+      .catch(() => {
+        showNotification('Could not reach the account server.', 'error');
+      })
+      .finally(() => setReady(true));
+  }, []);
+
+  const handleSetup = async (username: string, password: string) => {
+    const result = await setupAdmin(username, password);
+    setUser(result.user);
+    setNeedsSetup(false);
+    showNotification('Admin account created.');
+  };
+
+  const handleLogin = async (loginData: { username: string; password: string }) => {
+    try {
+      const result = await login(loginData.username, loginData.password);
+      setUser(result.user);
       showNotification('Login successful!');
-    } else {
-      showNotification('Invalid username or password', 'error');
+    } catch (caught) {
+      showNotification(caught instanceof Error ? caught.message : 'Invalid username or password', 'error');
     }
   };
 
-  const handleRegister = (registerData: RegisterFormData) => {
-    const normalizedUsername = registerData.username.trim().toLowerCase();
-    if (registerData.password !== registerData.confirmPassword) {
-      showNotification('Passwords do not match', 'error');
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } catch {
+      showNotification('Could not reach the account server.', 'error');
       return;
     }
-    if (localStorage.getItem(`password_${normalizedUsername}`)) {
-      showNotification('Username already exists', 'error');
-      return;
-    }
-    localStorage.setItem(`password_${normalizedUsername}`, registerData.password);
-    showNotification('Registration successful! Please login.');
-    setShowLogin(true);
-  };
-
-  const handleLogout = () => {
-    localStorage.removeItem('isLoggedIn');
-    localStorage.removeItem('username');
-    setIsLoggedIn(false);
-    setUsername('');
+    setUser(null);
+    setShowAccess(false);
     showNotification('Logged out successfully');
-  };
-
-  const toggleForm = () => {
-    setShowLogin(!showLogin);
   };
 
   return (
     <div className="bg-gray-100 min-h-screen">
-      {/* Notification */}
       {notification.message && (
         <div
           className={`fixed top-4 right-4 p-4 rounded-lg text-white ${
@@ -95,7 +85,6 @@ function App() {
         </div>
       )}
 
-      {/* Navigation */}
       <nav className="bg-white shadow-md">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16">
@@ -109,12 +98,22 @@ function App() {
                 Expensely
               </span>
             </div>
-            {isLoggedIn && (
+            {user && (
               <div className="flex items-center">
                 <span className="mr-4 text-gray-600">
-                  Welcome, {username}!
+                  Welcome, {user.username}!
                 </span>
+                {user.role === 'admin' && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAccess((open) => !open)}
+                    className="mr-2 bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600 btn"
+                  >
+                    {showAccess ? 'Hide access' : 'Access'}
+                  </button>
+                )}
                 <button
+                  type="button"
                   onClick={handleLogout}
                   className="bg-red-500 text-white px-4 py-2 rounded-md hover:bg-red-600 btn"
                 >
@@ -126,16 +125,18 @@ function App() {
         </div>
       </nav>
 
-      {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {!isLoggedIn ? (
-          showLogin ? (
-            <LoginForm onToggleForm={toggleForm} onSubmit={handleLogin} />
-          ) : (
-            <RegisterForm onToggleForm={toggleForm} onSubmit={handleRegister} />
-          )
+        {!ready ? (
+          <p className="text-center text-gray-600">Loading…</p>
+        ) : needsSetup ? (
+          <AdminSetup onSubmit={handleSetup} />
+        ) : !user ? (
+          <LoginForm onSubmit={handleLogin} />
         ) : (
-          <ExpenseTracker username={username} />
+          <>
+            {user.role === 'admin' && showAccess && <AdminPanel currentUserId={user.id} />}
+            <ExpenseTracker username={user.username} />
+          </>
         )}
       </main>
     </div>

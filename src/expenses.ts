@@ -66,8 +66,113 @@ export function expensesKey(username: string): string {
   return `expenses_${username.trim().toLowerCase()}`;
 }
 
-function transfersKey(username: string): string {
-  return `statement_transfers_${username.trim().toLowerCase()}`;
+interface StoredTransfer {
+  key: string;
+  amount: number;
+  direction?: 'in' | 'out';
+}
+
+export interface UserLedger {
+  expenses: ExpenseItem[];
+  paycheckSettings: PaycheckSettings | null;
+  balanceSnapshots: BalanceSnapshot[];
+  transfers: StoredTransfer[];
+  descriptionChoices: string[];
+  removedChoices: string[];
+}
+
+function emptyLedger(): UserLedger {
+  return {
+    expenses: [],
+    paycheckSettings: null,
+    balanceSnapshots: [],
+    transfers: [],
+    descriptionChoices: [],
+    removedChoices: [],
+  };
+}
+
+const ledgers = new Map<string, UserLedger>();
+
+function ledgerKey(username: string): string {
+  return username.trim().toLowerCase();
+}
+
+function ledgerFor(username: string): UserLedger {
+  const key = ledgerKey(username);
+  const existing = ledgers.get(key);
+  if (existing) return existing;
+  const created = emptyLedger();
+  ledgers.set(key, created);
+  return created;
+}
+
+export function ledgerHasData(ledger: UserLedger): boolean {
+  return ledger.expenses.length > 0
+    || ledger.paycheckSettings != null
+    || ledger.balanceSnapshots.length > 0
+    || ledger.transfers.length > 0
+    || ledger.descriptionChoices.length > 0
+    || ledger.removedChoices.length > 0;
+}
+
+export function installLedger(username: string, ledger: UserLedger): void {
+  ledgers.set(ledgerKey(username), {
+    expenses: Array.isArray(ledger.expenses) ? ledger.expenses : [],
+    paycheckSettings: ledger.paycheckSettings,
+    balanceSnapshots: Array.isArray(ledger.balanceSnapshots) ? ledger.balanceSnapshots : [],
+    transfers: Array.isArray(ledger.transfers) ? ledger.transfers : [],
+    descriptionChoices: Array.isArray(ledger.descriptionChoices) ? ledger.descriptionChoices : [],
+    removedChoices: Array.isArray(ledger.removedChoices) ? ledger.removedChoices : [],
+  });
+}
+
+function browserJson<T>(key: string): T | null {
+  const raw = localStorage.getItem(key);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
+/** One-time copy of this browser's saved ledger, used before the database has a row. */
+export function readBrowserLedger(username: string): UserLedger | null {
+  const key = ledgerKey(username);
+  const expensesRaw = localStorage.getItem(expensesKey(key));
+  const paycheckRaw = localStorage.getItem(`paycheck_settings_${key}`);
+  const balanceRaw = localStorage.getItem(`balance_snapshots_${key}`);
+  const transferRaw = localStorage.getItem(`statement_transfers_${key}`);
+  const choicesRaw = localStorage.getItem(`description_choices_${key}`);
+  const removedRaw = localStorage.getItem(`description_removed_${key}`);
+  if (!expensesRaw && !paycheckRaw && !balanceRaw && !transferRaw && !choicesRaw && !removedRaw) return null;
+  const expenses = browserJson<ExpenseItem[]>(expensesKey(key));
+  const paycheckSettings = browserJson<PaycheckSettings>(`paycheck_settings_${key}`);
+  const balanceSnapshots = browserJson<BalanceSnapshot[]>(`balance_snapshots_${key}`);
+  const transfers = browserJson<StoredTransfer[]>(`statement_transfers_${key}`);
+  const descriptionChoices = browserJson<string[]>(`description_choices_${key}`);
+  const removedChoices = browserJson<string[]>(`description_removed_${key}`);
+  return {
+    expenses: Array.isArray(expenses) ? expenses : [],
+    paycheckSettings,
+    balanceSnapshots: Array.isArray(balanceSnapshots) ? balanceSnapshots : [],
+    transfers: Array.isArray(transfers) ? transfers : [],
+    descriptionChoices: Array.isArray(descriptionChoices) ? descriptionChoices : [],
+    removedChoices: Array.isArray(removedChoices) ? removedChoices : [],
+  };
+}
+
+export function clearBrowserLedger(username: string): void {
+  const key = ledgerKey(username);
+  [
+    expensesKey(key),
+    `paycheck_settings_${key}`,
+    `balance_snapshots_${key}`,
+    `statement_transfers_${key}`,
+    `description_choices_${key}`,
+    `description_removed_${key}`,
+  ].forEach(item => localStorage.removeItem(item));
 }
 
 export function parseDate(dateStr: string): Date {
@@ -77,15 +182,7 @@ export function parseDate(dateStr: string): Date {
 }
 
 export function loadExpenses(username: string): ExpenseItem[] {
-  const raw = localStorage.getItem(expensesKey(username));
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed;
-  } catch {
-    return [];
-  }
+  return [...ledgerFor(username).expenses];
 }
 
 export function isSeedExpenses(items: ExpenseItem[]): boolean {
@@ -162,35 +259,26 @@ export interface PaycheckSettings {
   extraDates?: string[];
 }
 
-function paycheckSettingsKey(username: string): string {
-  return `paycheck_settings_${username.trim().toLowerCase()}`;
-}
-
 export function loadPaycheckSettings(username: string): PaycheckSettings | null {
-  const raw = localStorage.getItem(paycheckSettingsKey(username));
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as Partial<PaycheckSettings>;
-    if (typeof parsed.amount !== 'number' || typeof parsed.intervalDays !== 'number' || typeof parsed.anchor !== 'string') {
-      return null;
-    }
-    if (parsed.amount <= 0 || parsed.intervalDays < 1 || !/^\d{4}-\d{2}-\d{2}$/.test(parsed.anchor)) return null;
-    const extraDates = Array.isArray(parsed.extraDates)
-      ? parsed.extraDates.filter((date): date is string => typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date))
-      : [];
-    return {
-      amount: parsed.amount,
-      intervalDays: Math.round(parsed.intervalDays),
-      anchor: parsed.anchor,
-      extraDates,
-    };
-  } catch {
+  const parsed = ledgerFor(username).paycheckSettings;
+  if (!parsed) return null;
+  if (typeof parsed.amount !== 'number' || typeof parsed.intervalDays !== 'number' || typeof parsed.anchor !== 'string') {
     return null;
   }
+  if (parsed.amount <= 0 || parsed.intervalDays < 1 || !/^\d{4}-\d{2}-\d{2}$/.test(parsed.anchor)) return null;
+  const extraDates = Array.isArray(parsed.extraDates)
+    ? parsed.extraDates.filter((date): date is string => typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date))
+    : [];
+  return {
+    amount: parsed.amount,
+    intervalDays: Math.round(parsed.intervalDays),
+    anchor: parsed.anchor,
+    extraDates,
+  };
 }
 
 export function savePaycheckSettings(username: string, settings: PaycheckSettings): void {
-  localStorage.setItem(paycheckSettingsKey(username), JSON.stringify(settings));
+  ledgerFor(username).paycheckSettings = settings;
 }
 
 export function resolvePaycheckSettings(username: string): PaycheckSettings | null {
@@ -218,28 +306,17 @@ export interface BalanceEstimate {
   snapshotAmount: number | null;
 }
 
-function balanceKey(username: string): string {
-  return `balance_snapshots_${username.trim().toLowerCase()}`;
-}
-
 export function loadBalanceSnapshots(username: string): BalanceSnapshot[] {
-  const raw = localStorage.getItem(balanceKey(username));
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter((item): item is BalanceSnapshot => (
-        !!item
-        && typeof item.date === 'string'
-        && /^\d{4}-\d{2}-\d{2}$/.test(item.date)
-        && typeof item.amount === 'number'
-        && Number.isFinite(item.amount)
-      ))
-      .sort((a, b) => a.date.localeCompare(b.date));
-  } catch {
-    return [];
-  }
+  const parsed = ledgerFor(username).balanceSnapshots;
+  return parsed
+    .filter((item): item is BalanceSnapshot => (
+      !!item
+      && typeof item.date === 'string'
+      && /^\d{4}-\d{2}-\d{2}$/.test(item.date)
+      && typeof item.amount === 'number'
+      && Number.isFinite(item.amount)
+    ))
+    .sort((a, b) => a.date.localeCompare(b.date));
 }
 
 export function saveBalanceSnapshot(username: string, date: string, amount: number): BalanceSnapshot[] | null {
@@ -247,13 +324,13 @@ export function saveBalanceSnapshot(username: string, date: string, amount: numb
   const next = loadBalanceSnapshots(username).filter(item => item.date !== date);
   next.push({ date, amount });
   next.sort((a, b) => a.date.localeCompare(b.date));
-  localStorage.setItem(balanceKey(username), JSON.stringify(next));
+  ledgerFor(username).balanceSnapshots = next;
   return next;
 }
 
 export function removeBalanceSnapshot(username: string, date: string): BalanceSnapshot[] {
   const next = loadBalanceSnapshots(username).filter(item => item.date !== date);
-  localStorage.setItem(balanceKey(username), JSON.stringify(next));
+  ledgerFor(username).balanceSnapshots = next;
   return next;
 }
 
@@ -761,12 +838,6 @@ export function buildAiSuggestions(
   return [...upcomingSuggestions(expenses, settings, new Date(), prompts), ...messages];
 }
 
-interface StoredTransfer {
-  key: string;
-  amount: number;
-  direction?: 'in' | 'out';
-}
-
 /** Account-to-account movement. "Transfer from" brings money in. "Transfer to" and Save As You Go take money out. */
 function transferDirection(text: string, direction: 'in' | 'out'): 'in' | 'out' | null {
   const normalized = text.toLowerCase();
@@ -812,20 +883,13 @@ export function loadTransferTotal(username: string, afterDate: string | null = n
 }
 
 export function removeStoredTransfer(username: string, key: string): DatedTransfer[] {
-  const next = loadTransfers(username).filter(transfer => transfer.key !== key);
-  localStorage.setItem(transfersKey(username), JSON.stringify(next));
+  ledgerFor(username).transfers = loadTransfers(username).filter(transfer => transfer.key !== key);
   return loadDatedTransfers(username);
 }
 
 function loadTransfers(username: string): StoredTransfer[] {
-  const raw = localStorage.getItem(transfersKey(username));
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
+  const parsed = ledgerFor(username).transfers;
+  return Array.isArray(parsed) ? parsed : [];
 }
 
 function sameExpense(a: ExpenseItem, b: ExpenseItem): boolean {
@@ -839,8 +903,22 @@ export function setRecurringMonthly(username: string, target: ExpenseItem, recur
   const items = loadExpenses(username).map(item => (
     sameExpense(item, target) ? { ...item, recurringMonthly: recurring } : item
   ));
-  localStorage.setItem(expensesKey(username), JSON.stringify(items));
+  ledgerFor(username).expenses = items;
   return items;
+}
+
+export function loadDescriptionChoices(username: string): string[] {
+  return ledgerFor(username).descriptionChoices.filter(item => typeof item === 'string' && item.trim() !== '');
+}
+
+export function loadRemovedChoices(username: string): string[] {
+  return ledgerFor(username).removedChoices.filter(item => typeof item === 'string' && item.trim() !== '');
+}
+
+export function saveDescriptionLists(username: string, custom: string[], removed: string[]): void {
+  const ledger = ledgerFor(username);
+  ledger.descriptionChoices = custom;
+  ledger.removedChoices = removed;
 }
 
 function seedSignature(item: ExpenseItem): string {
