@@ -471,6 +471,6 @@ if (isProd) {
 }
 
 await migrate();
-app.listen(port, () => {
-  console.log(`Expensely listening on http://localhost:${port}`);
+app.listen(port, '127.0.0.1', () => {
+  console.log(`Expensely listening on http://127.0.0.1:${port}`);
 });
